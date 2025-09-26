@@ -9,6 +9,7 @@ Config = {
 	},
 }
 
+--[[ --removed with jim-bridge requirement.
 function locale(section, string)
 	if not string then
 		print(section, "string is nil")
@@ -19,4 +20,6 @@ function locale(section, string)
     if not localTable[section] then return "["..section.."] Invalid" end
     if not localTable[section][string] then return "["..string.."] Invalid" end
     return localTable[section][string]
+
 end
+]]
