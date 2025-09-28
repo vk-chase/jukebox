@@ -97,8 +97,11 @@ AddEventHandler("onResourceStart", function(res)
 end)
 
 -- Sync new player after they load
-RegisterNetEvent("QBCore:Server:PlayerLoaded", function()
-    syncOne(source)
+AddEventHandler('QBCore:Server:PlayerLoaded', function(player)
+    local src = type(player) == "table" and player.PlayerData and player.PlayerData.source or player
+    if src then
+        if syncOne then syncOne(src) elseif syncAll then syncAll() end
+    end
 end)
 
 --=========================
@@ -320,6 +323,12 @@ end)
 --=========================
 -- Client on-demand sync
 --=========================
-RegisterNetEvent("djbooth:server:requestSync", function()
-    syncOne(source)
+
+RegisterNetEvent('djbooth:server:requestSync', function()
+    local src = source
+    if syncOne then
+        syncOne(src)
+    else
+        if syncAll then syncAll() end
+    end
 end)
