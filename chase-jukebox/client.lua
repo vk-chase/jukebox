@@ -2,6 +2,7 @@
 -- QBCore Init
 -- =========================
 local QBCore = exports['qb-core']:GetCoreObject()
+local _didInitialSync = false
 
 -- =========================
 -- State
@@ -22,6 +23,10 @@ local function DrawTextTopCenter(text)
     EndTextCommandDisplayText(0.5, 0.02)
 end
 
+local function RequestStationSync()
+    TriggerServerEvent("djbooth:server:requestSync")
+end
+
 local function RotationToDirection(rot)
     local z = math.rad(rot.z); local x = math.rad(rot.x)
     local num = math.abs(math.cos(x))
@@ -39,7 +44,6 @@ local function RaycastFromCamera(dist)
 end
 
 local function parseModel(modelField)
-    -- Accept number, numeric-string, or model name
     if type(modelField) == "number" then
         return modelField
     elseif type(modelField) == "string" then
@@ -50,15 +54,14 @@ local function parseModel(modelField)
     return 0
 end
 
--- ===== Tagging & cleanup (handles ghost props across restarts) =====
+-- ===== Tagging & cleanup =====
 local DECOR_KEY = "dj_station"
 
 local function tagStationEntity(ent)
     if not DecorIsRegisteredAsType(DECOR_KEY, 2) then
-        DecorRegister(DECOR_KEY, 2) -- 2 = bool
+        DecorRegister(DECOR_KEY, 2)
     end
     DecorSetBool(ent, DECOR_KEY, true)
-
     local ok, entity = pcall(function() return Entity(ent) end)
     if ok and entity and entity.state then
         entity.state:set(DECOR_KEY, true, true)
@@ -94,15 +97,9 @@ local function cleanupOrphanStations()
     end)
 end
 
--- on client (re)start: clean leftovers, then ask server for a fresh list
-CreateThread(function()
-    Wait(200)
-    cleanupOrphanStations()
-    TriggerServerEvent("djbooth:server:requestSync")
-end)
-
--- =================================================================
-
+-- =========================
+-- Spawning
+-- =========================
 local function despawnAllStations()
     for _, data in pairs(Spawned) do
         if data.obj and DoesEntityExist(data.obj) then
@@ -128,8 +125,6 @@ local function spawnOneStation(booth)
     SetEntityAsMissionEntity(obj, true, true)
     SetEntityHeading(obj, pos.w or 0.0)
     FreezeEntityPosition(obj, true)
-
-    -- cleanns on restart
     tagStationEntity(obj)
 
     exports['qb-target']:AddTargetEntity(obj, {
@@ -170,7 +165,7 @@ RegisterNetEvent("djbooth:client:startPlacement", function(model)
 
     local mhash = parseModel(model)
     RequestModel(mhash); while not HasModelLoaded(mhash) do Wait(0) end
-    -- create ghost
+
     if ghostProp and DoesEntityExist(ghostProp) then DeleteObject(ghostProp) end
     local base = GetEntityCoords(PlayerPedId()) + (GetEntityForwardVector(PlayerPedId()) * 1.5)
     ghostProp = CreateObjectNoOffset(mhash, base.x, base.y, base.z, false, false, false)
@@ -208,12 +203,12 @@ RegisterNetEvent("djbooth:client:startPlacement", function(model)
                 SetEntityHeading(ghostProp, currentHeading)
             end
 
-            if IsControlPressed(0, 175) then currentHeading = (currentHeading + 1.0) % 360.0 end -- →
-            if IsControlPressed(0, 174) then currentHeading = (currentHeading - 1.0) % 360.0 end -- ←
-            if IsControlPressed(0, 172) then zOffset = zOffset + 0.02 end -- ↑
-            if IsControlPressed(0, 173) then zOffset = zOffset - 0.02 end -- ↓
-            if IsControlJustPressed(0, 241) then currentDist = math.max(0.5, currentDist - 0.2) end -- scroll up
-            if IsControlJustPressed(0, 242) then currentDist = math.min(10.0, currentDist + 0.2) end -- scroll down
+            if IsControlPressed(0, 175) then currentHeading = (currentHeading + 1.0) % 360.0 end
+            if IsControlPressed(0, 174) then currentHeading = (currentHeading - 1.0) % 360.0 end
+            if IsControlPressed(0, 172) then zOffset = zOffset + 0.02 end
+            if IsControlPressed(0, 173) then zOffset = zOffset - 0.02 end
+            if IsControlJustPressed(0, 241) then currentDist = math.max(0.5, currentDist - 0.2) end
+            if IsControlJustPressed(0, 242) then currentDist = math.min(10.0, currentDist + 0.2) end
 
             local validPlacement = true
             for _, data in pairs(Spawned) do
@@ -222,7 +217,6 @@ RegisterNetEvent("djbooth:client:startPlacement", function(model)
                     break
                 end
             end
-
             if ghostProp and DoesEntityExist(ghostProp) then
                 SetEntityDrawOutlineColor(validPlacement and 0 or 255, validPlacement and 255 or 0, 0, 255)
             end
@@ -264,10 +258,9 @@ RegisterNetEvent("djbooth:client:startPlacement", function(model)
 end)
 
 -- =========================
--- Sync From Server (spawn + target)
+-- Sync From Server
 -- =========================
 RegisterNetEvent("djbooth:client:syncLocations", function(serverList)
-    -- Convert array -> map by id for lookups
     local newMap = {}
     for _, booth in ipairs(serverList or {}) do
         if booth and booth.id then
@@ -275,12 +268,11 @@ RegisterNetEvent("djbooth:client:syncLocations", function(serverList)
         end
     end
     Locations = newMap
-
-    -- respawn everything fresh
     despawnAllStations()
     for _, booth in pairs(Locations) do
         spawnOneStation(booth)
     end
+    _didInitialSync = true
 end)
 
 -- =========================
@@ -299,30 +291,25 @@ end
 RegisterNetEvent("djbooth:client:openBoothMenu", function(data)
     local id = extractId(data)
     if not id or not Locations[id] then return end
-    TriggerEvent("djbooth:client:playMusic", { id = id })
-end)
-
-RegisterNetEvent("djbooth:client:playMusic", function(data)
-    local id = extractId(data) or data.id
-    local Booth = id and Locations[id]; if not Booth then return end
 
     local menu = {
         {
             title = "Play Song",
-            description = "Enter YouTube URL",
+            description = "Enter a YouTube URL",
             icon = "fab fa-youtube",
             onSelect = function() TriggerEvent("djbooth:client:musicMenu", { id = id }) end
         },
         {
             title = "History",
+            description = "Recent songs at this station",
             icon = "fas fa-clock-rotate-left",
             onSelect = function() TriggerEvent("djbooth:client:history", { id = id }) end
         },
-        -- future update -- dont uncomment -- :) -- {
-        -- future update -- dont uncomment -- :) --     title = "Pause / Resume",
-        -- future update -- dont uncomment -- :) --     icon = "fas fa-pause",
-        -- future update -- dont uncomment -- :) --     onSelect = function() TriggerServerEvent("djbooth:server:PauseResume", { id = id }) end
-        -- future update -- dont uncomment -- :) -- },
+        {
+            title = "Pause / Resume",
+            icon = "fas fa-pause",
+            onSelect = function() TriggerServerEvent("djbooth:server:PauseResume", { id = id }) end
+        },
         {
             title = "Stop Music",
             icon = "fas fa-stop",
@@ -330,6 +317,7 @@ RegisterNetEvent("djbooth:client:playMusic", function(data)
         },
         {
             title = "Change Volume",
+            description = "1–100",
             icon = "fas fa-volume-up",
             onSelect = function() TriggerEvent("djbooth:client:changeVolume", { id = id }) end
         }
@@ -339,17 +327,26 @@ RegisterNetEvent("djbooth:client:playMusic", function(data)
     lib.showContext("djbooth_menu_"..id)
 end)
 
+RegisterNetEvent("djbooth:client:musicMenu", function(data)
+    local id = extractId(data) or data.id
+    if not id then return end
+    local dialog = lib.inputDialog("Play Song", { { type = "input", label = "YouTube URL", required = true } })
+    if not dialog then return end
+    local url = dialog[1]
+    if not url:find("youtu") then url = "https://www.youtube.com/watch?v="..url end
+    TriggerServerEvent("djbooth:server:playMusic", url, id)
+end)
+
 RegisterNetEvent("djbooth:client:history", function(data)
     local id = extractId(data) or data.id
     if not id then return end
-
-    -- ask server for list for THIS station
     local list = lib.callback.await('djbooth:songInfo', false, id) or {}
 
     local opts = {}
     for i = #list, 1, -1 do
         local url = list[i]
-        local thumb = "https://img.youtube.com/vi/"..string.sub(url, -11).."/mqdefault.jpg"
+        local vid = string.sub(url, -11)
+        local thumb = "https://img.youtube.com/vi/"..vid.."/mqdefault.jpg"
         opts[#opts+1] = {
             title = url,
             image = thumb,
@@ -368,16 +365,6 @@ RegisterNetEvent("djbooth:client:history", function(data)
     lib.showContext(hid)
 end)
 
-RegisterNetEvent("djbooth:client:musicMenu", function(data)
-    local id = extractId(data) or data.id
-    if not id then return end
-    local dialog = lib.inputDialog("Play Song", { { type = "input", label = "YouTube URL", required = true } })
-    if not dialog then return end
-    local url = dialog[1]
-    if not url:find("youtu") then url = "https://www.youtube.com/watch?v="..url end
-    TriggerServerEvent("djbooth:server:playMusic", url, id)
-end)
-
 RegisterNetEvent("djbooth:client:changeVolume", function(data)
     local id = extractId(data) or data.id
     if not id then return end
@@ -393,7 +380,6 @@ end)
 -- =========================
 CreateThread(function()
     Wait(200)
-    -- remove leftover tagged stations from previous run
     cleanupOrphanStations()
 end)
 
@@ -404,4 +390,33 @@ AddEventHandler("onResourceStop", function(res)
         DeleteObject(ghostProp)
     end
     despawnAllStations()
+end)
+
+-- initial pull on client start
+CreateThread(function()
+    Wait(600)
+    RequestStationSync()
+end)
+
+-- hard sync on character load
+RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
+    _didInitialSync = false
+    CreateThread(function()
+        Wait(500)
+        despawnAllStations()
+        cleanupOrphanStations()
+        RequestStationSync()
+    end)
+end)
+
+RegisterNetEvent('QBCore:Client:OnPlayerUnload', function()
+    _didInitialSync = false
+    despawnAllStations()
+end)
+
+-- fallback for non-QBCore respawns
+AddEventHandler('playerSpawned', function()
+    if not _didInitialSync then
+        SetTimeout(800, RequestStationSync)
+    end
 end)
