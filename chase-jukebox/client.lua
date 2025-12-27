@@ -444,3 +444,12 @@ AddEventHandler('playerSpawned', function()
         SetTimeout(800, RequestStationSync)
     end
 end)
+
+RegisterNetEvent("djbooth:client:removeSpawnedBooth", function(id)
+    local data = Spawned[id]
+    if data and data.obj and DoesEntityExist(data.obj) then
+        pcall(function() exports['qb-target']:RemoveTargetEntity(data.obj) end)
+        DeleteObject(data.obj)
+    end
+    Spawned[id] = nil
+end)
