@@ -137,14 +137,6 @@ local function spawnOneStation(booth)
                 args  = { id = booth.id },
                 id    = booth.id,
             },
-            {
-                type  = "server",
-                event = "djbooth:server:removeBooth",
-                icon  = "fas fa-trash",
-                label = "Remove Music Station",
-                args  = { id = booth.id },
-                id    = booth.id,
-            }
         },
         distance = 2.0
     })
@@ -182,54 +174,63 @@ RegisterNetEvent("djbooth:client:startPlacement", function(model)
 
     CreateThread(function()
         while placing do
-            local hit, coords = RaycastFromCamera(currentDist)
-            if hit and coords then
-                currentCoords = coords
-            else
-                local camRot = GetGameplayCamRot(2); local camPos = GetGameplayCamCoord()
-                local dir = RotationToDirection(camRot)
-                currentCoords = camPos + (dir * currentDist)
-            end
+            local playerPed = PlayerPedId()
+            local playerPos = GetEntityCoords(playerPed)
+            local forward = GetEntityForwardVector(playerPed)
+            local distance = currentDist or 1.5 -- distance in front of player
 
-            local ok, gz = GetGroundZFor_3dCoord(currentCoords.x, currentCoords.y, currentCoords.z + 5.0, true)
+            -- calculate placement coords in front of player
+            local localCoords = playerPos + forward * distance
+
+            -- get ground Z
+            local ok, gz = GetGroundZFor_3dCoord(localCoords.x, localCoords.y, localCoords.z + 5.0, true)
             if ok and gz > 0.0 then
-                currentCoords = vector3(currentCoords.x, currentCoords.y, gz + zOffset)
+                localCoords = vector3(localCoords.x, localCoords.y, gz + zOffset)
             else
-                currentCoords = currentCoords + vector3(0,0,zOffset)
+                localCoords = localCoords + vector3(0, 0, zOffset)
             end
 
+            -- move ghost prop
             if ghostProp and DoesEntityExist(ghostProp) then
-                SetEntityCoordsNoOffset(ghostProp, currentCoords.x, currentCoords.y, currentCoords.z, true, true, true)
+                SetEntityCoordsNoOffset(ghostProp, localCoords.x, localCoords.y, localCoords.z, true, true, true)
                 SetEntityHeading(ghostProp, currentHeading)
             end
 
-            if IsControlPressed(0, 175) then currentHeading = (currentHeading + 1.0) % 360.0 end
-            if IsControlPressed(0, 174) then currentHeading = (currentHeading - 1.0) % 360.0 end
-            if IsControlPressed(0, 172) then zOffset = zOffset + 0.02 end
-            if IsControlPressed(0, 173) then zOffset = zOffset - 0.02 end
-            if IsControlJustPressed(0, 241) then currentDist = math.max(0.5, currentDist - 0.2) end
-            if IsControlJustPressed(0, 242) then currentDist = math.min(10.0, currentDist + 0.2) end
+            -- rotation controls
+            if IsControlPressed(0, 175) then currentHeading = (currentHeading + 1.0) % 360.0 end -- right arrow
+            if IsControlPressed(0, 174) then currentHeading = (currentHeading - 1.0) % 360.0 end -- left arrow
 
+            -- Z offset controls
+            if IsControlPressed(0, 172) then zOffset = zOffset + 0.02 end -- up arrow
+            if IsControlPressed(0, 173) then zOffset = zOffset - 0.02 end -- down arrow
+
+            -- scroll distance controls
+            if IsControlJustPressed(0, 241) then currentDist = math.max(0.5, currentDist - 0.2) end -- scroll up
+            if IsControlJustPressed(0, 242) then currentDist = math.min(10.0, currentDist + 0.2) end -- scroll down
+
+            -- validate placement
             local validPlacement = true
             for _, data in pairs(Spawned) do
-                if data.obj and DoesEntityExist(data.obj) and #(GetEntityCoords(data.obj) - currentCoords) < 1.0 then
+                if data.obj and DoesEntityExist(data.obj) and #(GetEntityCoords(data.obj) - localCoords) < 1.0 then
                     validPlacement = false
                     break
                 end
             end
+
             if ghostProp and DoesEntityExist(ghostProp) then
                 SetEntityDrawOutlineColor(validPlacement and 0 or 255, validPlacement and 255 or 0, 0, 255)
             end
 
-            if IsControlJustPressed(0, 191) then
+            -- place object
+            if IsControlJustPressed(0, 191) then -- Enter
                 if validPlacement then
                     TriggerServerEvent("djbooth:server:addPlacedBooth", {
                         job = "public",
                         enableBooth = true,
                         DefaultVolume = 0.2,
                         radius = 30,
-                        coords = vector4(currentCoords.x, currentCoords.y, currentCoords.z, currentHeading),
-                        prop = { model = mhash, coords = vector4(currentCoords.x, currentCoords.y, currentCoords.z, currentHeading) }
+                        coords = vector4(localCoords.x, localCoords.y, localCoords.z, currentHeading),
+                        prop = { model = mhash, coords = vector4(localCoords.x, localCoords.y, localCoords.z, currentHeading) }
                     })
                     placing = false
                 else
@@ -237,7 +238,8 @@ RegisterNetEvent("djbooth:client:startPlacement", function(model)
                 end
             end
 
-            if IsControlJustPressed(0, 177) then
+            -- cancel placement
+            if IsControlJustPressed(0, 177) then -- Backspace
                 if ghostProp and DoesEntityExist(ghostProp) then
                     SetEntityDrawOutline(ghostProp, false)
                     DeleteObject(ghostProp)
@@ -249,12 +251,14 @@ RegisterNetEvent("djbooth:client:startPlacement", function(model)
             Wait(0)
         end
 
+        -- cleanup ghost
         if ghostProp and DoesEntityExist(ghostProp) then
             SetEntityDrawOutline(ghostProp, false)
             DeleteObject(ghostProp)
         end
         ghostProp, PlacingInProgress = nil, false
     end)
+
 end)
 
 -- =========================
@@ -306,11 +310,6 @@ RegisterNetEvent("djbooth:client:openBoothMenu", function(data)
             onSelect = function() TriggerEvent("djbooth:client:history", { id = id }) end
         },
         {
-            title = "Pause / Resume",
-            icon = "fas fa-pause",
-            onSelect = function() TriggerServerEvent("djbooth:server:PauseResume", { id = id }) end
-        },
-        {
             title = "Stop Music",
             icon = "fas fa-stop",
             onSelect = function() TriggerServerEvent("djbooth:server:stopMusic", { id = id }) end
@@ -320,12 +319,37 @@ RegisterNetEvent("djbooth:client:openBoothMenu", function(data)
             description = "1–100",
             icon = "fas fa-volume-up",
             onSelect = function() TriggerEvent("djbooth:client:changeVolume", { id = id }) end
+        },
+        {
+            title = "Set Range",
+            description = "Max 25 units",
+            icon = "fas fa-ruler-combined",
+            onSelect = function()
+                local dialog = lib.inputDialog("Set Range", { { type = "input", label = "1-25", required = true } })
+                if dialog then
+                    local range = tonumber(dialog[1]) or 25
+                    range = math.max(1, math.min(25, range))
+                    TriggerServerEvent("djbooth:server:setRange", range, id)
+                end
+            end
+        },
+        -- blank separator
+        { title = " ", disabled = true },
+        {
+            title = "Pickup / Remove",
+            icon = "fas fa-trash",
+            description = "Remove this music station",
+            onSelect = function()
+                TriggerServerEvent("djbooth:server:removeBooth", { id = id })
+            end
         }
     }
 
     lib.registerContext({ id = "djbooth_menu_"..id, title = "MUSIC STATION", options = menu })
     lib.showContext("djbooth_menu_"..id)
 end)
+
+
 
 RegisterNetEvent("djbooth:client:musicMenu", function(data)
     local id = extractId(data) or data.id
