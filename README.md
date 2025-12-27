@@ -23,6 +23,8 @@ Placed jukeboxes persist across server restarts, keeping ownership, volume setti
 - Optimized sync: Efficient client-server communication for new players and resource restarts.
 - xSound safety: Handles missing or older builds gracefully.
 - Clean menus via ox_lib: Play YouTube URLs, view history, change volume, stop music, pickup/remove jukebox.
+- <img width="1502" height="1306" alt="image" src="https://github.com/user-attachments/assets/f4ad4e58-f14f-4f7c-8425-363c9f93c1d5" />
+
 <img width="910" height="887" alt="Untitled" src="https://github.com/user-attachments/assets/52e50fda-8d90-4173-b441-b4e3b642ad9b" />
 ## Roadmap
 - Expand pause/resume functionality across all xSound builds.
