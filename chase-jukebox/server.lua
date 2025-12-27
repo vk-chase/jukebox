@@ -171,6 +171,8 @@ RegisterNetEvent("djbooth:server:removeBooth", function(data)
     Locations[id] = nil
     IsPaused[id] = nil
 
+    TriggerClientEvent("djbooth:client:removeSpawnedBooth", -1, id)
+
     Player.Functions.AddItem(USABLE_ITEM, 1)
     TriggerClientEvent("inventory:client:ItemBox", src, QBCore.Shared.Items[USABLE_ITEM], "add")
     TriggerClientEvent("QBCore:Notify", src, "Music Station removed", "success")
