@@ -4,24 +4,17 @@
 
 local QBCore = exports['qb-core']:GetCoreObject()
 
--- Config
-local USABLE_ITEM = "jukeboxone"        -- the usable item name in your items.lua
-local DEFAULT_PROP = "prop_jukebox_02"  -- default object placed if client doesn't send one
-local HISTORY_KEEP = 5                  -- how many recent urls to keep per-station
+local USABLE_ITEM = "jukeboxone"
+local DEFAULT_PROP = "prop_jukebox_02"
+local HISTORY_KEEP = 5
 
--- In-memory registry (keyed by DB id)
-local Locations = {}    -- [id] = { id, owner, job, enableBooth, DefaultVolume, radius, coords=vector4, prop={model,coords} }
-local IsPaused  = {}    -- [id] = true/false
-
---=========================
--- Helpers
---=========================
+local Locations = {}
+local IsPaused  = {}
 
 local function labelFor(id)
     return ("station_%s"):format(id)
 end
 
--- Accept qb-target payload styles or raw id/string id
 local function extractId(payload)
     if type(payload) == "table" then
         if payload.id then return tonumber(payload.id) end
@@ -30,7 +23,6 @@ local function extractId(payload)
     return tonumber(payload)
 end
 
--- Safe xsound call (tolerates forks/older builds)
 local function xs(fn, ...)
     local ok, res = pcall(function(...)
         local ex = exports.xsound
@@ -61,9 +53,6 @@ local function syncOne(src)
     TriggerClientEvent("djbooth:client:syncLocations", src, asArray(Locations))
 end
 
---=========================
--- Load from DB on start
---=========================
 AddEventHandler("onResourceStart", function(res)
     if res ~= GetCurrentResourceName() then return end
     Locations = {}
@@ -71,7 +60,6 @@ AddEventHandler("onResourceStart", function(res)
 
     local rows = MySQL.query.await("SELECT * FROM music_stations", {}) or {}
     for _, r in ipairs(rows) do
-        -- oxmysql returns DECIMAL as strings; coerce to numbers
         local x = toNum(r.x, 0.0)
         local y = toNum(r.y, 0.0)
         local z = toNum(r.z, 0.0)
@@ -96,7 +84,6 @@ AddEventHandler("onResourceStart", function(res)
     syncAll()
 end)
 
--- Sync new player after they load
 AddEventHandler('QBCore:Server:PlayerLoaded', function(player)
     local src = type(player) == "table" and player.PlayerData and player.PlayerData.source or player
     if src then
@@ -104,9 +91,6 @@ AddEventHandler('QBCore:Server:PlayerLoaded', function(player)
     end
 end)
 
---=========================
--- Usable Item
---=========================
 QBCore.Functions.CreateUseableItem(USABLE_ITEM, function(source, item)
     local Player = QBCore.Functions.GetPlayer(source)
     if not Player then return end
@@ -118,15 +102,11 @@ QBCore.Functions.CreateUseableItem(USABLE_ITEM, function(source, item)
     end
 end)
 
---=========================
--- Add Station (on placement)
---=========================
 RegisterNetEvent("djbooth:server:addPlacedBooth", function(boothData)
     local src = source
     local Player = QBCore.Functions.GetPlayer(src)
     if not Player then return end
 
-    -- consume item
     if not Player.Functions.RemoveItem(USABLE_ITEM, 1) then
         TriggerClientEvent("QBCore:Notify", src, "No Music Station to place", "error")
         return
@@ -136,15 +116,12 @@ RegisterNetEvent("djbooth:server:addPlacedBooth", function(boothData)
     local cid = Player.PlayerData.citizenid
     local c = boothData.coords or {}
     local x, y, z, h = toNum(c.x, 0.0), toNum(c.y, 0.0), toNum(c.z, 0.0), toNum(c.w, 0.0)
-
     local modelField = (boothData.prop and boothData.prop.model) or DEFAULT_PROP
     local modelStr = tostring(modelField)
-
     local vol = toNum(boothData.DefaultVolume, 0.2)
     if vol < 0.0 then vol = 0.0 elseif vol > 1.0 then vol = 1.0 end
     local rad = math.max(1, math.floor(toNum(boothData.radius, 30)))
 
-    -- INSERT now includes `item`
     local insertId = MySQL.insert.await([[
         INSERT INTO music_stations (citizenid, item, model, x, y, z, heading, volume, radius, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
@@ -171,9 +148,6 @@ RegisterNetEvent("djbooth:server:addPlacedBooth", function(boothData)
     TriggerClientEvent("QBCore:Notify", src, "Music Station placed", "success")
 end)
 
---=========================
--- Remove Station (owner only)
---=========================
 RegisterNetEvent("djbooth:server:removeBooth", function(data)
     local src = source
     local Player = QBCore.Functions.GetPlayer(src)
@@ -192,22 +166,16 @@ RegisterNetEvent("djbooth:server:removeBooth", function(data)
         return
     end
 
-    xs('Destroy', -1, labelFor(id)) -- safe even if absent
-
+    xs('Destroy', -1, labelFor(id))
     MySQL.update.await("DELETE FROM music_stations WHERE id = ?", { id })
     Locations[id] = nil
     IsPaused[id] = nil
-    syncAll()
 
-    -- Return the same item we consumed
     Player.Functions.AddItem(USABLE_ITEM, 1)
     TriggerClientEvent("inventory:client:ItemBox", src, QBCore.Shared.Items[USABLE_ITEM], "add")
     TriggerClientEvent("QBCore:Notify", src, "Music Station removed", "success")
 end)
 
---=========================
--- History callback (server -> client)
---=========================
 lib.callback.register('djbooth:songInfo', function(src, id)
     id = tonumber(id)
     if not id then return {} end
@@ -225,9 +193,6 @@ lib.callback.register('djbooth:songInfo', function(src, id)
     return out
 end)
 
---=========================
--- Music Controls + DB history
---=========================
 RegisterNetEvent("djbooth:server:playMusic", function(url, id)
     id = tonumber(id); if not id then return end
     local booth = Locations[id]; if not booth then return end
@@ -241,25 +206,21 @@ RegisterNetEvent("djbooth:server:playMusic", function(url, id)
     xs('Distance',  -1, lbl, rad)
     xs('setVolume', -1, lbl, vol)
 
-    -- Upsert into history
     MySQL.prepare.await([[
         INSERT INTO music_station_history (station_id, url, played_at)
         VALUES (?, ?, NOW())
         ON DUPLICATE KEY UPDATE played_at = VALUES(played_at)
     ]], { id, url })
 
-    -- Trim to HISTORY_KEEP newest
-    MySQL.update.await(([[
-        DELETE h FROM music_station_history h
-        WHERE h.station_id = ?
-          AND h.id NOT IN (
+    MySQL.update.await(([[DELETE h FROM music_station_history h
+        WHERE h.station_id = ? AND h.id NOT IN (
             SELECT id FROM (
-              SELECT id FROM music_station_history
-              WHERE station_id = ?
-              ORDER BY played_at DESC
-              LIMIT %d
+                SELECT id FROM music_station_history
+                WHERE station_id = ?
+                ORDER BY played_at DESC
+                LIMIT %d
             ) t
-          )
+        )
     ]]):format(HISTORY_KEEP), { id, id })
 
     IsPaused[id] = false
@@ -278,13 +239,11 @@ RegisterNetEvent("djbooth:server:PauseResume", function(data)
     if not Locations[id] then return end
     local lbl = labelFor(id)
 
-    -- Try native toggle if present
     if xs('TogglePause', -1, lbl) then
         IsPaused[id] = not IsPaused[id]
         return
     end
 
-    -- Fallback emulation
     local nowPaused = IsPaused[id] == true
     if nowPaused then
         if xs('Resume', -1, lbl) or xs('setPause', -1, lbl, false) then
@@ -307,22 +266,15 @@ RegisterNetEvent("djbooth:server:changeVolume", function(vol, id)
     vol = toNum(vol, booth.DefaultVolume or 0.2)
     if vol < 0.0 then vol = 0.0 elseif vol > 1.0 then vol = 1.0 end
     xs('setVolume', -1, labelFor(id), vol)
-    booth.DefaultVolume = vol -- keep in memory so new plays use it
+    booth.DefaultVolume = vol
 end)
 
---=========================
--- Cleanup on resource stop
---=========================
 AddEventHandler("onResourceStop", function(res)
     if res ~= GetCurrentResourceName() then return end
     for id in pairs(Locations) do
         xs('Destroy', -1, labelFor(id))
     end
 end)
-
---=========================
--- Client on-demand sync
---=========================
 
 RegisterNetEvent('djbooth:server:requestSync', function()
     local src = source
@@ -331,4 +283,21 @@ RegisterNetEvent('djbooth:server:requestSync', function()
     else
         if syncAll then syncAll() end
     end
+end)
+
+RegisterNetEvent("djbooth:server:setRange", function(range, id)
+    local src = source
+    id = tonumber(id)
+    range = tonumber(range)
+    if not id or not Locations[id] then
+        TriggerClientEvent("QBCore:Notify", src, "Station not found", "error")
+        return
+    end
+
+    range = math.max(1, math.min(25, range))
+    Locations[id].radius = range
+    xs('Distance', -1, labelFor(id), range)
+    MySQL.update("UPDATE music_stations SET radius = ? WHERE id = ?", { range, id })
+    TriggerClientEvent("QBCore:Notify", src, ("Station range set to %d"):format(range), "success")
+    syncAll()
 end)
