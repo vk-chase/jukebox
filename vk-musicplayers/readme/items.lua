@@ -1,0 +1,1 @@
+    jukeboxone = {name = 'jukeboxone', label = 'Jukebox', weight = 10000, type = 'item', image = 'jukeboxone.png', unique = false, useable = true, description = 'A Placable Jukebox, holds song history up to 5 plays!.'},
